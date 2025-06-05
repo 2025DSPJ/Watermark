@@ -1,5 +1,22 @@
-.git
-__pycache__
-output
-outputs
+# 파이썬
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 가상환경
+venv/
+.venv/
+
+# 결과물, 체크포인트, 임시파일
+checkpoints/
+outputs/
+output/
+results/
 *.pth
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / IDE
+.DS_Store
+.vscode/
