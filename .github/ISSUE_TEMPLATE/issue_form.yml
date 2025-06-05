@@ -1,0 +1,32 @@
+name: 'DeepTrue 이슈 생성'
+description: '이슈를 생성하면 Jira에도 자동으로 생성됩니다.'
+labels: [task]
+title: '이슈 제목을 입력하세요'
+body:
+  - type: input
+    id: parentKey
+    attributes:
+      label: '상위 작업 Jira Ticket Number'
+      description: '상위 작업의 Ticket Number를 입력하세요 (없으면 건너뛰기)'
+      placeholder: 'ETR-00'
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: '이슈 설명'
+      description: '이슈에 대한 상세 설명을 작성하세요.'
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: '체크리스트'
+      description: '해야 할 작업을 목록으로 작성하세요.'
+      value: |
+        - [ ] 작업 1
+        - [ ] 작업 2
+    validations:
+      required: false
