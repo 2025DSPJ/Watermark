@@ -30,3 +30,4 @@ body:
         - [ ] 작업 2
     validations:
       required: false
+      
