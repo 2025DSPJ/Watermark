@@ -6,8 +6,8 @@ from PIL import Image
 import torch
 from watermark_anything.data.metrics import msg_predict_inference
 import os
-# import uuid
 from torchvision import transforms
+from datetime import datetime
 
 from notebooks.inference_utils import (
     load_model_from_checkpoint,
@@ -16,9 +16,6 @@ from notebooks.inference_utils import (
     plot_outputs,
     msg2str
 )
-
-# from watermark_anything.data.transforms import get_transforms
-# _, default_transform = get_transforms(img_size=256)
 
 # 정규화 파라미터 (ImageNet 기준)
 image_mean = torch.tensor([0.485, 0.456, 0.406])
@@ -47,8 +44,8 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 def home():
     return "서버 구동 완료~"
 
-@app.route('/watermark', methods=['POST'])
-def watermark():
+@app.route('/watermark-insert', methods=['POST'])
+def watermarkInsert():
     # 이미지와 메시지 받기
     image_file = request.files['image']
     message = request.form.get('message', 'AI24')
@@ -67,10 +64,6 @@ def watermark():
     outputs = wam.embed(img_pt, wm_msg)
     mask = create_random_mask(img_pt, num_masks=1, mask_percentage=0.1)
     img_w = outputs['imgs_w'] * mask + img_pt * (1 - mask)
-
-    # # 워터마크 이미지 처리
-    # out_img = unnormalize_img(img_w).squeeze(0).detach()
-    # out_img_pil = Image.fromarray((out_img.permute(1,2,0).cpu().numpy()*255).astype('uint8'))
 
     # 1. 정규화 해제 + 값 범위 제한 (0~1)
     out_img = unnormalize_img(img_w).squeeze(0).detach().clamp_(0, 1)
@@ -94,34 +87,92 @@ def watermark():
     mask_gt_path = os.path.join(RESULTS_DIR, mask_gt_filename)
     mask_gt_pil.save(mask_gt_path)
 
+    # 메시지 저장
+    message_save_path = os.path.join(RESULTS_DIR, f"{base_name}_message.txt")
+    with open(message_save_path, 'w') as f:
+        f.write(message)
+
+
     # 1. 서버에 파일로 저장
-    # filename = f"{uuid.uuid4().hex}.png"  # 고유 파일명 생성
     original_name = os.path.splitext(image_file.filename)[0]  # 확장자 제외
     filename = f"{original_name}_deeptruth_watermark.png"
     save_path = os.path.join(RESULTS_DIR, filename)
     out_img_pil.save(save_path)
-
-    # # 2. 클라이언트로 반환
-    # img_bytes = io.BytesIO()
-    # out_img_pil.save(img_bytes, format='PNG')
-    # img_bytes.seek(0)
-    # return send_file(img_bytes, mimetype='image/png')
-
-    # 다운로드 URL 반환
-    # return jsonify({
-    #     "message": "워터마크 삽입 성공",
-    #     "download_url": f"/results/{filename}"
-    # })
 
     # 클라이언트 응답에 GT 마스크 URL 추가
     return jsonify({
         "message": "워터마크 삽입 성공",
         "download_url": f"/results/{filename}",
         "mask_gt_url": f"/results/{mask_gt_filename}",
-        # "original_message": original_msg,
-        # "restored_message": restored_msg,
-        # "bit_accuracy": round(bit_acc * 100, 2)
     })
+
+@app.route('/watermark-detection', methods=['POST'])
+def watermarkDetection():
+    try:
+        # 1. 이미지 수신 및 기본 정보 추출
+        image_file = request.files['image']
+        original_filename = image_file.filename
+        base_name = original_filename.split('_deeptruth_watermark')[0]
+        
+        # 2. GT 마스크 & 원본 메시지 파일 경로 생성
+        mask_gt_filename = f"{base_name}_mask_gt.png"
+        mask_gt_path = os.path.join(RESULTS_DIR, mask_gt_filename)
+        message_filename = f"{base_name}_message.txt"
+        message_path = os.path.join(RESULTS_DIR, message_filename)
+
+        # 3. 필수 파일 존재 여부 확인
+        if not all(os.path.exists(p) for p in [mask_gt_path, message_path]):
+            return jsonify({"error": "워터마크 정보를 찾을 수 없습니다."}), 404
+
+        # 4. 원본 메시지 로드
+        with open(message_path, 'r') as f:
+            original_message = f.read().strip()
+
+        # 5. 이미지 & 마스크 전처리
+        image = Image.open(image_file.stream).convert("RGB")
+        img_pt = default_transform(image).unsqueeze(0).to(device)
+        
+        # 마스크를 업로드 이미지 크기로 맞추기
+        mask_gt = Image.open(mask_gt_path).convert('L')
+        mask_gt = mask_gt.resize(image.size, resample=Image.NEAREST)
+        mask_gt = transforms.ToTensor()(mask_gt).unsqueeze(0).to(device)
+        mask_gt = (mask_gt > 0.5).float()  # 이진화
+
+        # 6. 메시지 추출
+        with torch.no_grad():
+            detect_outputs = wam.detect(img_pt)  # <-- .extract() 대신 .detect()
+            preds = detect_outputs['preds']      # shape: [B, 1+nbits, H, W]
+            mask_preds = preds[:, 0:1, :, :]     # 첫 채널은 마스크
+            bit_preds = preds[:, 1:, :, :]       # 나머지는 비트 메시지
+
+        # 7. 정확도 계산
+        pred_message = msg_predict_inference(bit_preds, mask_preds)
+        restored_msg = msg2str(pred_message[0])
+        
+        # 8. 원본 메시지 텐서 변환
+        wm_bits = ''.join(f"{ord(c):08b}" for c in original_message.ljust(4, '\x00'))[:32]
+        wm_tensor = torch.tensor([int(b) for b in wm_bits], dtype=torch.float32).to(device)
+        
+        bit_acc = (pred_message == wm_tensor.unsqueeze(0)).float().mean().item()
+
+        # 9. 업로드 이미지 저장
+        upload_filename = f"{base_name}_detection_input.png"
+        upload_path = os.path.join(RESULTS_DIR, upload_filename)
+        image.save(upload_path)
+
+        # 10. 날짜 생성
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        return jsonify({
+            "uploaded_image": f"/results/{upload_filename}",
+            "mask_gt": f"/results/{mask_gt_filename}",
+            "original_message": original_message,
+            "bit_accuracy": float(f"{bit_acc * 100:.1f}"),
+            "detected_at": timestamp
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/results/<filename>', methods=['GET'])
 @cross_origin(origins="*")
