@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify, send_from_directory
+from flask import Flask, request, send_file, jsonify, make_response
 from flask_cors import CORS
 from flask_cors import cross_origin
 from werkzeug.utils import secure_filename
@@ -9,10 +9,8 @@ from watermark_anything.data.metrics import msg_predict_inference
 import os
 from torchvision import transforms
 from datetime import datetime
-import boto3
-from dotenv import load_dotenv
-from botocore.exceptions import NoCredentialsError
 import requests
+import base64
 
 from notebooks.inference_utils import (
     load_model_from_checkpoint,
@@ -20,21 +18,6 @@ from notebooks.inference_utils import (
     unnormalize_img,
     plot_outputs,
     msg2str
-)
-
-# AWS 설정
-load_dotenv
-
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_REGION = os.getenv("AWS_REGION")
-S3_BUCKET = os.getenv("AWS_S3_BUCKET")
-
-s3 = boto3.client(
-    's3',
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    region_name=AWS_REGION
 )
 
 # 정규화 파라미터 (ImageNet 기준)
@@ -48,7 +31,10 @@ default_transform = transforms.Compose([
 ])
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins="*")
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
 
 # 모델 준비 (서버 시작 시 1회만)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -61,11 +47,13 @@ RESULTS_DIR = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 @app.route('/', methods=['GET'])
+# @cross_origin(origins="*")
 def home():
     return "서버 구동 완료~"
 
 # 워터마크 삽입
 @app.route('/watermark-insert', methods=['POST'])
+@cross_origin()
 def watermarkInsert():
     # 이미지와 메시지 받기
     image_file = request.files['image']
@@ -113,36 +101,24 @@ def watermarkInsert():
     with open(message_save_path, 'w') as f:
         f.write(message)
 
-    # 이미지를 백엔드로 전송
-    # PIL 이미지 -> BytesIO 변환
-    img_io = io.BytesIO()
-    out_img_pil.save(img_io, format='PNG')
-    img_io.seek(0)
-
     # 파일명 처리
     original_name = os.path.splitext(secure_filename(image_file.filename))[0]  # example.jpg → example
     watermarked_name = f"{original_name}_deeptruth_watermark.png"
 
-    # S3 업로드
-    try:
-        s3.upload_fileobj(
-            img_io,
-            S3_BUCKET,
-            watermarked_name,
-            ExtraArgs={
-                'ContentType': 'image/png',
-                'ACL': 'public-read',
-            }
-        )
-    except NoCredentialsError:
-        return jsonify({ "error": "AWS 자격 증명 오류" }), 500
-    
-    s3_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{watermarked_name}"
+    # 이미지를 백엔드로 전송
+    # base64로 변환
+    img_io = io.BytesIO()
+    out_img_pil.save(img_io, format='PNG')
+    img_io.seek(0)
+    img_bytes = img_io.getvalue()
+    img_b64 = base64.b64encode(img_bytes).decode('utf-8')
 
-    return jsonify({
-        "message": "워터마크 삽입 성공",
-        "s3_url": s3_url
+    response = jsonify({
+        'image_base64': img_b64,
+        'filename': watermarked_name,
+        'message': message
     })
+    return response
 
 # 워터마크 탐지
 @app.route('/watermark-detection', methods=['POST'])
@@ -213,22 +189,19 @@ def watermarkDetection():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/download-image')
-@cross_origin(origins="*")
-def download_image():
-    s3_url = request.args.get('url')
-    filename = request.args.get('filename', 'watermarked.png')
+# @app.route('/download-image')
+# def download_image():
+#     s3_url = request.args.get('url')
+#     filename = request.args.get('filename', 'watermarked.png')
 
-    response = requests.get(s3_url, stream=True)
+#     response = requests.get(s3_url, stream=True)
 
-    if response.status_code != 200:
-        return jsonify({ "error": "Failed to fetch image from S3" }), 500
+#     if response.status_code != 200:
+#         return jsonify({ "error": "Failed to fetch image from S3" }), 500
 
-    return send_file(
-        io.BytesIO(response.content),
-        mimetype='image/png',
-        as_attachment=True,
-        download_name=filename
-    ) 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+#     return send_file(
+#         io.BytesIO(response.content),
+#         mimetype='image/png',
+#         as_attachment=True,
+#         download_name=filename
+#     ) 
