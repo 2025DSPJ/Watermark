@@ -30,11 +30,15 @@ default_transform = transforms.Compose([
     transforms.Normalize(mean=image_mean, std=image_std),
 ])
 
+# base64 변환 함수
+def pil_to_base64(pil_img, fmt="PNG") -> str:
+    buf = io.BytesIO()
+    pil_img.save(buf, format=fmt)
+    buf.seek(0)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
 app = Flask(__name__)
 CORS(app, origins="*")
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
 
 # 모델 준비 (서버 시작 시 1회만)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -51,8 +55,11 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 def home():
     return "서버 구동 완료~"
 
+# if __name__ == '__main__':
+#     app.run(host='0.0.0.0', port=5000, debug=True)
+
 # 워터마크 삽입
-@app.route('/watermark-insert', methods=['POST'])
+@app.route('/watermark-insert', methods=['POST'], strict_slashes=False)
 @cross_origin()
 def watermarkInsert():
     # 이미지와 메시지 받기
@@ -107,14 +114,14 @@ def watermarkInsert():
 
     # 이미지를 백엔드로 전송
     # base64로 변환
-    img_io = io.BytesIO()
-    out_img_pil.save(img_io, format='PNG')
-    img_io.seek(0)
-    img_bytes = img_io.getvalue()
-    img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+    # img_io = io.BytesIO()
+    # out_img_pil.save(img_io, format='PNG')
+    # img_io.seek(0)
+    # img_bytes = img_io.getvalue()
+    # img_b64 = base64.b64encode(img_bytes).decode('utf-8')
 
     response = jsonify({
-        'image_base64': img_b64,
+        'image_base64': pil_to_base64(out_img_pil),
         'filename': watermarked_name,
         'message': message
     })
@@ -148,9 +155,10 @@ def watermarkDetection():
         img_pt = default_transform(image).unsqueeze(0).to(device)
         
         # 마스크를 업로드 이미지 크기로 맞추기
-        mask_gt = Image.open(mask_gt_path).convert('L')
-        mask_gt = mask_gt.resize(image.size, resample=Image.NEAREST)
-        mask_gt = transforms.ToTensor()(mask_gt).unsqueeze(0).to(device)
+        # mask_gt = Image.open(mask_gt_path).convert('L')
+        # mask_gt = mask_gt.resize(image.size, resample=Image.NEAREST)
+        mask_gt_pil = Image.open(mask_gt_path).convert('L').resize(image.size, resample=Image.NEAREST)
+        mask_gt = transforms.ToTensor()(mask_gt_pil).unsqueeze(0).to(device)
         mask_gt = (mask_gt > 0.5).float()  # 이진화
 
         # 6. 메시지 추출
@@ -162,7 +170,6 @@ def watermarkDetection():
 
         # 7. 정확도 계산
         pred_message = msg_predict_inference(bit_preds, mask_preds)
-        restored_msg = msg2str(pred_message[0])
         
         # 8. 원본 메시지 텐서 변환
         wm_bits = ''.join(f"{ord(c):08b}" for c in original_message.ljust(4, '\x00'))[:32]
@@ -171,20 +178,26 @@ def watermarkDetection():
         bit_acc = (pred_message == wm_tensor.unsqueeze(0)).float().mean().item()
 
         # 9. 업로드 이미지 저장
-        upload_filename = f"{base_name}_detection_input.png"
-        upload_path = os.path.join(RESULTS_DIR, upload_filename)
-        image.save(upload_path)
+        # upload_filename = f"{base_name}_detection_input.png"
+        # upload_path = os.path.join(RESULTS_DIR, upload_filename)
+        # image.save(upload_path)
 
         # 10. 날짜 생성
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        return jsonify({
-            "uploaded_image": f"{upload_filename}",
-            "mask_gt": f"{mask_gt_filename}",
-            "original_message": original_message,
-            "bit_accuracy": float(f"{bit_acc * 100:.1f}"),
-            "detected_at": timestamp
-        })
+        # 기본 결과값 (정확도 90이상 시)
+        result = {
+            "basename": base_name,
+            "bit_accuracy": round(bit_acc * 100, 1),
+            "detected_at": timestamp,
+        }
+
+        # 정확도 < 90이면 삽입 이미지와 마스크 이미지 포함
+        if result['bit_accuracy'] < 90:
+            result['image_base64'] = pil_to_base64(image)        # 삽입 이미지
+            result['mask_base64'] = pil_to_base64(mask_gt_pil)   # 마스크 이미지
+
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -205,3 +218,6 @@ def watermarkDetection():
 #         as_attachment=True,
 #         download_name=filename
 #     ) 
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
