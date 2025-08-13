@@ -5,6 +5,7 @@ from PIL import Image
 import torch
 from watermark_anything.data.metrics import msg_predict_inference
 import os
+from werkzeug.utils import secure_filename
 from torchvision import transforms
 from datetime import datetime
 import base64
@@ -49,7 +50,6 @@ def home():
 @app.route('/watermark-insert', methods=['POST'])
 def watermarkInsert():
     # 이미지와 메시지 받기
-    # image_file = request.files['image']
     image_file = request.files.get('image')
     message = request.form.get('message', 'AI24')
     assert len(message) <= 4, "메시지는 4자 이하만 가능"
@@ -82,13 +82,20 @@ def watermarkInsert():
     # 4. PIL 이미지 생성
     out_img_pil = Image.fromarray(out_img_np)
 
-    # 1. 삽입 마스크 (GT) 생성 (원본 이미지와 동일 크기)
+    # # 1. 삽입 마스크 (GT) 생성 (원본 이미지와 동일 크기)
     # mask_gt = mask.squeeze().cpu().numpy()  # (1, H, W) → (H, W)
     # mask_gt_pil = Image.fromarray((mask_gt * 255).astype('uint8'))
 
+    # 파일명 처리
+    original_name = os.path.splitext(secure_filename(image_file.filename))[0]  # example.jpg → example
+    ext = os.path.splitext(secure_filename(image_file.filename))[1]            # 확장자 (jpg, png 등)
+    watermarked_name = f"{original_name}_deeptruth_watermark{ext}"             # 파일명 (확장자 포함)
+
     response = jsonify({
         'image_base64': pil_to_base64(out_img_pil),     # 삽입 이미지
-        'message': message
+        'message': message,                             # 워터마크 메세지
+        'filename': watermarked_name,                   # 다운로드 시 사용 될 파일 이름
+        # 'mask_image_base64': pil_to_base64(mask_gt_pil) # 마스크 이미지
     })
     return response
 
