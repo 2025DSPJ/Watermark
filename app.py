@@ -4,8 +4,7 @@ import io
 from PIL import Image
 import torch
 from watermark_anything.data.metrics import msg_predict_inference
-import os
-from werkzeug.utils import secure_filename
+import os, re
 from torchvision import transforms
 from datetime import datetime
 import base64
@@ -32,6 +31,16 @@ def pil_to_base64(pil_img, fmt="PNG") -> str:
     pil_img.save(buf, format=fmt)
     buf.seek(0)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+# 파일명(한글 포함)
+def safe_filename(filename: str) -> str:
+    # 확장자 분리
+    name, ext = os.path.splitext(filename)
+    # 한글, 영문, 숫자, 일부 특수문자만 허용 → 나머지는 제거
+    name = re.sub(r'[^가-힣a-zA-Z0-9_\- ]', '', name)
+    # 공백을 _ 로 변환
+    name = name.replace(" ", "_")
+    return name + ext
 
 app = Flask(__name__)
 CORS(app, origins="*")
@@ -67,7 +76,7 @@ def watermarkInsert():
 
     # 워터마크 삽입
     outputs = wam.embed(img_pt, wm_msg)
-    mask = create_random_mask(img_pt, num_masks=1, mask_percentage=0.1)
+    mask = create_random_mask(img_pt, num_masks=1, mask_percentage=0.5)
     img_w = outputs['imgs_w'] * mask + img_pt * (1 - mask)
 
     # 1. 정규화 해제 + 값 범위 제한 (0~1)
@@ -87,9 +96,9 @@ def watermarkInsert():
     # mask_gt_pil = Image.fromarray((mask_gt * 255).astype('uint8'))
 
     # 파일명 처리
-    original_name = os.path.splitext(secure_filename(image_file.filename))[0]  # example.jpg → example
-    ext = os.path.splitext(secure_filename(image_file.filename))[1]            # 확장자 (jpg, png 등)
-    watermarked_name = f"{original_name}_deeptruth_watermark{ext}"             # 파일명 (확장자 포함)
+    original_name = os.path.splitext(safe_filename(image_file.filename))[0]  # example.jpg → example
+    ext = os.path.splitext(safe_filename(image_file.filename))[1]            # 확장자 (jpg, png 등)
+    watermarked_name = f"{original_name}_deeptruth_watermark{ext}"           # 파일명 (확장자 포함)
 
     response = jsonify({
         'image_base64': pil_to_base64(out_img_pil),     # 삽입 이미지
@@ -104,7 +113,6 @@ def watermarkInsert():
 def watermarkDetection():
     try:
         # 1. 이미지 수신 및 기본 정보 추출
-        # image_file = request.files['image']
         image_file = request.files.get('image')
         message = request.form.get('message', '')               # 삽입 당시 메시지 (db에서 가져오는 값)
         # mask_gt_base64 = request.form.get('mask_gt_base64')     # 삽입 당시 마스크 이미지(base64, db에서 가져오는 값)
@@ -140,7 +148,9 @@ def watermarkDetection():
 
         # 10. 응답
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        base_name = os.path.splitext(image_file.filename)[0]
+        original_name = os.path.splitext(safe_filename(image_file.filename))[0]  # example.jpg → example
+        ext = os.path.splitext(safe_filename(image_file.filename))[1]  
+        base_name = f"{original_name}{ext}"
 
         # 기본 결과값 (정확도 90이상 시)
         result = {
