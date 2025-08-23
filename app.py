@@ -8,6 +8,7 @@ import os, re
 from torchvision import transforms
 from datetime import datetime
 import base64
+import requests, time
 
 from notebooks.inference_utils import (
     load_model_from_checkpoint,
@@ -31,6 +32,37 @@ def pil_to_base64(pil_img, fmt="PNG") -> str:
     pil_img.save(buf, format=fmt)
     buf.seek(0)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+# 이미지 전송 진행률 함수
+
+# BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:8080") 
+
+SPRING_SERVER_URL = 'http://localhost:8080/progress' 
+
+def send_progress_to_spring(task_id, percent):
+    try:
+        payload = {
+            'taskId': task_id,
+            'progress': percent
+        }
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        print(f"Flask에서 Spring으로 POST 요청 보내는 중: {payload}", flush=True)
+        requests.post(SPRING_SERVER_URL, json=payload, headers=headers, timeout=1)
+    except Exception as e:
+        print(f"[WARN] 진행률 전송 실패: {e}")
+
+# def send_progress_to_spring(task_id, progress):
+#     print("send_progress_to_spring 함수 진입")
+#     url = 'http://localhost:8080/progress'
+#     data = {
+#         "taskId": task_id,
+#         "progress": progress
+#     }
+#     response = requests.post(url, json=data)
+#     return response.json()
+
 
 # 파일명(한글 포함)
 def safe_filename(filename: str) -> str:
@@ -58,12 +90,19 @@ def home():
 # 워터마크 삽입
 @app.route('/watermark-insert', methods=['POST'])
 def watermarkInsert():
+    task_id = request.form.get('taskId') # taskId 받아오기
+
     # 이미지와 메시지 받기
     image_file = request.files.get('image')
     message = request.form.get('message', 'AI24')
     assert len(message) <= 4, "메시지는 4자 이하만 가능"
     if not image_file or not message:
         return jsonify({"error": "image, message 둘 다 필요합니다."}), 400
+    
+    # 이미지 전송 시작
+    print("워터마크 삽입 함수 시작")
+    send_progress_to_spring(task_id, 0)
+    print("send_progress_to_spring 호출 후")
 
     # 이미지 로드 및 전처리
     image = Image.open(image_file.stream).convert("RGB")
@@ -78,6 +117,7 @@ def watermarkInsert():
     outputs = wam.embed(img_pt, wm_msg)
     mask = create_random_mask(img_pt, num_masks=1, mask_percentage=0.5)
     img_w = outputs['imgs_w'] * mask + img_pt * (1 - mask)
+    send_progress_to_spring(task_id, 50)
 
     # 1. 정규화 해제 + 값 범위 제한 (0~1)
     out_img = unnormalize_img(img_w).squeeze(0).detach().clamp_(0, 1)
@@ -100,11 +140,15 @@ def watermarkInsert():
     ext = os.path.splitext(safe_filename(image_file.filename))[1]            # 확장자 (jpg, png 등)
     watermarked_name = f"{original_name}_deeptruth_watermark{ext}"           # 파일명 (확장자 포함)
 
+    # 이미지 전송 완료
+    send_progress_to_spring(task_id, 100)
+
     response = jsonify({
         'image_base64': pil_to_base64(out_img_pil),     # 삽입 이미지
         'message': message,                             # 워터마크 메세지
         'filename': watermarked_name,                   # 다운로드 시 사용 될 파일 이름
-        # 'mask_image_base64': pil_to_base64(mask_gt_pil) # 마스크 이미지
+        # 'mask_image_base64': pil_to_base64(mask_gt_pil) # 마스크 이미지,
+        'taskId': task_id
     })
     return response
 
@@ -112,10 +156,13 @@ def watermarkInsert():
 @app.route('/watermark-detection', methods=['POST'])
 def watermarkDetection():
     try:
+        task_id = request.form.get('taskId') # taskId 받아오기
         # 1. 이미지 수신 및 기본 정보 추출
         image_file = request.files.get('image')
         message = request.form.get('message', '')               # 삽입 당시 메시지 (db에서 가져오는 값)
         # mask_gt_base64 = request.form.get('mask_gt_base64')     # 삽입 당시 마스크 이미지(base64, db에서 가져오는 값)
+
+        send_progress_to_spring(task_id, 0)
 
         if not image_file or not message:
             return jsonify({"error": "image, message 둘 다 필요합니다."}), 400
@@ -138,6 +185,8 @@ def watermarkDetection():
 
         # 7. 정확도 계산
         pred_message = msg_predict_inference(bit_preds, mask_preds)
+
+        send_progress_to_spring(task_id, 50)
         
         # 8. 원본 메시지 텐서 변환
         wm_bits = ''.join(f"{ord(c):08b}" for c in message.ljust(4, '\x00'))[:32]
@@ -152,11 +201,14 @@ def watermarkDetection():
         ext = os.path.splitext(safe_filename(image_file.filename))[1]  
         base_name = f"{original_name}{ext}"
 
+        send_progress_to_spring(task_id, 100)
+
         # 기본 결과값 (정확도 90이상 시)
         result = {
             "basename": base_name,
             "bit_accuracy": bit_acc_pct,
             "detected_at": timestamp,
+            'taskId': task_id
         }
 
         # 정확도 < 90이면 삽입 이미지 포함
