@@ -34,9 +34,6 @@ def pil_to_base64(pil_img, fmt="PNG") -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 # 이미지 전송 진행률 함수
-
-# BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:8080") 
-
 SPRING_SERVER_URL = 'http://localhost:8080/progress' 
 
 def send_progress_to_spring(task_id, percent):
@@ -52,17 +49,6 @@ def send_progress_to_spring(task_id, percent):
         requests.post(SPRING_SERVER_URL, json=payload, headers=headers, timeout=1)
     except Exception as e:
         print(f"[WARN] 진행률 전송 실패: {e}")
-
-# def send_progress_to_spring(task_id, progress):
-#     print("send_progress_to_spring 함수 진입")
-#     url = 'http://localhost:8080/progress'
-#     data = {
-#         "taskId": task_id,
-#         "progress": progress
-#     }
-#     response = requests.post(url, json=data)
-#     return response.json()
-
 
 # 파일명(한글 포함)
 def safe_filename(filename: str) -> str:
@@ -100,9 +86,7 @@ def watermarkInsert():
         return jsonify({"error": "image, message 둘 다 필요합니다."}), 400
     
     # 이미지 전송 시작
-    print("워터마크 삽입 함수 시작")
     send_progress_to_spring(task_id, 0)
-    print("send_progress_to_spring 호출 후")
 
     # 이미지 로드 및 전처리
     image = Image.open(image_file.stream).convert("RGB")
@@ -112,6 +96,7 @@ def watermarkInsert():
     wm_bits = ''.join(f"{ord(c):08b}" for c in message)
     wm_bits = wm_bits.ljust(32, '0')[:32]
     wm_msg = torch.tensor([[int(bit) for bit in wm_bits]], dtype=torch.float32).to(device)
+    send_progress_to_spring(task_id, 25)
 
     # 워터마크 삽입
     outputs = wam.embed(img_pt, wm_msg)
@@ -130,6 +115,8 @@ def watermarkInsert():
 
     # 4. PIL 이미지 생성
     out_img_pil = Image.fromarray(out_img_np)
+
+    send_progress_to_spring(task_id, 75)
 
     # # 1. 삽입 마스크 (GT) 생성 (원본 이미지와 동일 크기)
     # mask_gt = mask.squeeze().cpu().numpy()  # (1, H, W) → (H, W)
@@ -170,6 +157,7 @@ def watermarkDetection():
         # 5. 이미지 & 마스크 전처리
         image = Image.open(image_file.stream).convert("RGB")
         img_pt = default_transform(image).unsqueeze(0).to(device)
+        send_progress_to_spring(task_id, 25)
 
         # GT 마스크 복원 -> 업로드 이미지 크기로 리사이즈
         # mask_gt_pil = base64_to_pil(mask_gt_base64, mode="L").resize(image.size, resample=Image.NEAREST)
@@ -194,6 +182,8 @@ def watermarkDetection():
         
         bit_acc = (pred_message == wm_tensor.unsqueeze(0)).float().mean().item()
         bit_acc_pct = round(bit_acc * 100, 1)
+
+        send_progress_to_spring(task_id, 75)
 
         # 10. 응답
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
