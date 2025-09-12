@@ -8,7 +8,7 @@ import os, re
 from torchvision import transforms
 from datetime import datetime
 import base64
-import requests, time
+import requests
 
 from notebooks.inference_utils import (
     load_model_from_checkpoint,
@@ -78,55 +78,50 @@ def home():
 def watermarkInsert():
     task_id = request.form.get('taskId') # taskId 받아오기
 
-    # 이미지와 메시지 받기
+    # 1. 이미지와 메시지 받기
     image_file = request.files.get('image')
-    message = request.form.get('message', 'AI24')
+    message = request.form.get('message', 'ETNL')
     assert len(message) <= 4, "메시지는 4자 이하만 가능"
     if not image_file or not message:
         return jsonify({"error": "image, message 둘 다 필요합니다."}), 400
     
-    # 이미지 전송 시작
+    # 작업 진행 상태 초기화
     send_progress_to_spring(task_id, 0)
 
-    # 이미지 로드 및 전처리
+    # 2. 이미지 로드 및 전처리
     image = Image.open(image_file.stream).convert("RGB")
     img_pt = default_transform(image).unsqueeze(0).to(device)
 
-    # 메시지 변환
+    # 3. 메시지 전처리
     wm_bits = ''.join(f"{ord(c):08b}" for c in message)
     wm_bits = wm_bits.ljust(32, '0')[:32]
     wm_msg = torch.tensor([[int(bit) for bit in wm_bits]], dtype=torch.float32).to(device)
+    
+    # 진행 상태 25%로 업데이트
     send_progress_to_spring(task_id, 25)
 
-    # 워터마크 삽입
+    # 3. 워터마크 삽입
     outputs = wam.embed(img_pt, wm_msg)
     mask = create_random_mask(img_pt, num_masks=1, mask_percentage=0.5)
     img_w = outputs['imgs_w'] * mask + img_pt * (1 - mask)
+
+    # 진행 상태 50%로 업데이트
     send_progress_to_spring(task_id, 50)
 
-    # 1. 정규화 해제 + 값 범위 제한 (0~1)
-    out_img = unnormalize_img(img_w).squeeze(0).detach().clamp_(0, 1)
-
-    # 2. CPU로 이동 후 numpy 변환 (HWC 형태)
-    out_img_np = out_img.permute(1, 2, 0).cpu().numpy()
-
-    # 3. 0~255 범위로 변환 (소수점 처리 개선)
-    out_img_np = (out_img_np * 255).round().astype('uint8')
-
-    # 4. PIL 이미지 생성
-    out_img_pil = Image.fromarray(out_img_np)
-
+    # 4. 이미지 후처리 
+    out_img = unnormalize_img(img_w).squeeze(0).detach().clamp_(0, 1)  # 1. 정규화 해제 + 값 범위 제한 (0~1)
+    out_img_np = out_img.permute(1, 2, 0).cpu().numpy()                # 2. CPU로 이동 후 numpy 변환 (HWC 형태)
+    out_img_np = (out_img_np * 255).round().astype('uint8')            # 3. 0~255 범위로 변환 (소수점 처리 개선)
+    out_img_pil = Image.fromarray(out_img_np)                          # 4. PIL 이미지 생성
+    
+    # 진행 상태 75%로 업데이트
     send_progress_to_spring(task_id, 75)
-
-    # # 1. 삽입 마스크 (GT) 생성 (원본 이미지와 동일 크기)
-    # mask_gt = mask.squeeze().cpu().numpy()  # (1, H, W) → (H, W)
-    # mask_gt_pil = Image.fromarray((mask_gt * 255).astype('uint8'))
 
     # 파일명 처리
     original_name = os.path.splitext(safe_filename(image_file.filename))[0]  # example.jpg → example
     ext = os.path.splitext(safe_filename(image_file.filename))[1]            # 확장자 (jpg, png 등)
     watermarked_name = f"{original_name}_deeptruth_watermark{ext}"           # 파일명 (확장자 포함)
-
+    
     # 이미지 전송 완료
     send_progress_to_spring(task_id, 100)
 
@@ -134,7 +129,6 @@ def watermarkInsert():
         'image_base64': pil_to_base64(out_img_pil),     # 삽입 이미지
         'message': message,                             # 워터마크 메세지
         'filename': watermarked_name,                   # 다운로드 시 사용 될 파일 이름
-        # 'mask_image_base64': pil_to_base64(mask_gt_pil) # 마스크 이미지,
         'taskId': task_id
     })
     return response
@@ -144,45 +138,45 @@ def watermarkInsert():
 def watermarkDetection():
     try:
         task_id = request.form.get('taskId') # taskId 받아오기
+
         # 1. 이미지 수신 및 기본 정보 추출
         image_file = request.files.get('image')
         message = request.form.get('message', '')               # 삽입 당시 메시지 (db에서 가져오는 값)
-        # mask_gt_base64 = request.form.get('mask_gt_base64')     # 삽입 당시 마스크 이미지(base64, db에서 가져오는 값)
-
-        send_progress_to_spring(task_id, 0)
-
         if not image_file or not message:
             return jsonify({"error": "image, message 둘 다 필요합니다."}), 400
+        
+        # 작업 진행 상태 초기화
+        send_progress_to_spring(task_id, 0)
 
-        # 5. 이미지 & 마스크 전처리
+        # 2. 이미지 전처리
         image = Image.open(image_file.stream).convert("RGB")
         img_pt = default_transform(image).unsqueeze(0).to(device)
+
+        # 진행 상태 25%로 업데이트
         send_progress_to_spring(task_id, 25)
 
-        # GT 마스크 복원 -> 업로드 이미지 크기로 리사이즈
-        # mask_gt_pil = base64_to_pil(mask_gt_base64, mode="L").resize(image.size, resample=Image.NEAREST)
-        # mask_gt = transforms.ToTensor()(mask_gt_pil).unsqueeze(0).to(device)
-        # mask_gt = (mask_gt > 0.5).float()
-
-        # 6. 추론
+        # 3. 워터마크 탐지 (모델 추론)
         with torch.no_grad():
-            detect_outputs = wam.detect(img_pt)  # <-- .extract() 대신 .detect()
+            detect_outputs = wam.detect(img_pt)
             preds = detect_outputs['preds']      # shape: [B, 1+nbits, H, W]
-            mask_preds = preds[:, 0:1, :, :]     # 첫 채널은 마스크
-            bit_preds = preds[:, 1:, :, :]       # 나머지는 비트 메시지
+            mask_preds = preds[:, 0:1, :, :]     # 예측된 마스크
+            bit_preds = preds[:, 1:, :, :]       # 예측된 메시지 비트
 
-        # 7. 정확도 계산
+        # 4. 예측된 비트로부터 메시지 추출
         pred_message = msg_predict_inference(bit_preds, mask_preds)
-
+        
+        # 진행 상태 50%로 업데이트
         send_progress_to_spring(task_id, 50)
         
-        # 8. 원본 메시지 텐서 변환
+        # 5. 원본 메시지 텐서 변환
         wm_bits = ''.join(f"{ord(c):08b}" for c in message.ljust(4, '\x00'))[:32]
         wm_tensor = torch.tensor([int(b) for b in wm_bits], dtype=torch.float32).to(device)
         
+        # 6. 비트 정확도 계산
         bit_acc = (pred_message == wm_tensor.unsqueeze(0)).float().mean().item()
         bit_acc_pct = round(bit_acc * 100, 1)
-
+        
+        # 진행 상태 75%로 업데이트
         send_progress_to_spring(task_id, 75)
 
         # 10. 응답
@@ -191,6 +185,7 @@ def watermarkDetection():
         ext = os.path.splitext(safe_filename(image_file.filename))[1]  
         base_name = f"{original_name}{ext}"
 
+        # 이미지 전송 완료
         send_progress_to_spring(task_id, 100)
 
         # 기본 결과값 (정확도 90이상 시)
@@ -204,7 +199,6 @@ def watermarkDetection():
         # 정확도 < 90이면 삽입 이미지 포함
         if result['bit_accuracy'] < 90:
             result['image_base64'] = pil_to_base64(image)        # 삽입 이미지
-            # result['mask_base64'] = pil_to_base64(mask_gt_pil)   # 마스크 이미지
 
         return jsonify(result)
 
