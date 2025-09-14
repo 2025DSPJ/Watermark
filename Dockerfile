@@ -7,7 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
     libpq-dev \
-    libgl1-mesa-glx \
+    # libgl1-mesa-glx \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 # 컨테이너 내 작업 디렉토리 설정
