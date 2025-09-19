@@ -1,5 +1,5 @@
 # 사용할 기본 이미지: Python 3.10.2 슬림 버전
-FROM pytorch/pytorch:2.7.0-cuda11.8-cudnn8-runtime
+FROM pytorch/pytorch:2.7.0-cpu-py3.10
 
 # 필요한 시스템 종속성 설치
 # apt 캐시를 제거하여 이미지 크기를 최적화
