@@ -36,11 +36,12 @@ def pil_to_base64(pil_img, fmt="PNG") -> str:
 # 이미지 전송 진행률 함수
 SPRING_SERVER_URL = 'http://localhost:8080/progress' 
 
-def send_progress_to_spring(task_id, percent):
+def send_progress_to_spring(task_id, percent, login_id):
     try:
         payload = {
             'taskId': task_id,
-            'progress': percent
+            'progress': percent,
+            'login_id': login_id
         }
         headers = {
             'Content-Type': 'application/json'
@@ -49,6 +50,14 @@ def send_progress_to_spring(task_id, percent):
         requests.post(SPRING_SERVER_URL, json=payload, headers=headers, timeout=1)
     except Exception as e:
         print(f"[WARN] 진행률 전송 실패: {e}")
+
+class ProgressSender:
+    def __init__(self, task_id, login_id):
+        self.task_id = task_id
+        self.login_id = login_id
+
+    def send(self, percent):
+        send_progress_to_spring(self.task_id, percent, self.login_id)
 
 # 파일명(한글 포함)
 def safe_filename(filename: str) -> str:
@@ -77,6 +86,9 @@ def home():
 @app.route('/watermark-insert', methods=['POST'])
 def watermarkInsert():
     task_id = request.form.get('taskId') # taskId 받아오기
+    login_id = request.form.get('loginId') # loginId 받아오기
+
+    send_progress = ProgressSender(task_id, login_id)
 
     # 1. 이미지와 메시지 받기
     image_file = request.files.get('image')
@@ -86,7 +98,7 @@ def watermarkInsert():
         return jsonify({"error": "image, message 둘 다 필요합니다."}), 400
     
     # 작업 진행 상태 초기화
-    send_progress_to_spring(task_id, 0)
+    send_progress.send(0)
 
     # 2. 이미지 로드 및 전처리
     image = Image.open(image_file.stream).convert("RGB")
@@ -98,7 +110,7 @@ def watermarkInsert():
     wm_msg = torch.tensor([[int(bit) for bit in wm_bits]], dtype=torch.float32).to(device)
     
     # 진행 상태 25%로 업데이트
-    send_progress_to_spring(task_id, 25)
+    send_progress.send(25)
 
     # 3. 워터마크 삽입
     outputs = wam.embed(img_pt, wm_msg)
@@ -106,7 +118,7 @@ def watermarkInsert():
     img_w = outputs['imgs_w'] * mask + img_pt * (1 - mask)
 
     # 진행 상태 50%로 업데이트
-    send_progress_to_spring(task_id, 50)
+    send_progress.send(50)
 
     # 4. 이미지 후처리 
     out_img = unnormalize_img(img_w).squeeze(0).detach().clamp_(0, 1)  # 1. 정규화 해제 + 값 범위 제한 (0~1)
@@ -115,7 +127,7 @@ def watermarkInsert():
     out_img_pil = Image.fromarray(out_img_np)                          # 4. PIL 이미지 생성
     
     # 진행 상태 75%로 업데이트
-    send_progress_to_spring(task_id, 75)
+    send_progress.send(75)
 
     # 파일명 처리
     original_name = os.path.splitext(safe_filename(image_file.filename))[0]  # example.jpg → example
@@ -123,7 +135,7 @@ def watermarkInsert():
     watermarked_name = f"{original_name}_deeptruth_watermark{ext}"           # 파일명 (확장자 포함)
     
     # 이미지 전송 완료
-    send_progress_to_spring(task_id, 100)
+    send_progress.send(100)
 
     response = jsonify({
         'image_base64': pil_to_base64(out_img_pil),     # 삽입 이미지
@@ -138,6 +150,9 @@ def watermarkInsert():
 def watermarkDetection():
     try:
         task_id = request.form.get('taskId') # taskId 받아오기
+        login_id = request.form.get('loginId') # loginId 받아오기
+
+        send_progress = ProgressSender(task_id, login_id)
 
         # 1. 이미지 수신 및 기본 정보 추출
         image_file = request.files.get('image')
@@ -146,14 +161,14 @@ def watermarkDetection():
             return jsonify({"error": "image, message 둘 다 필요합니다."}), 400
         
         # 작업 진행 상태 초기화
-        send_progress_to_spring(task_id, 0)
+        send_progress.send(0)
 
         # 2. 이미지 전처리
         image = Image.open(image_file.stream).convert("RGB")
         img_pt = default_transform(image).unsqueeze(0).to(device)
 
         # 진행 상태 25%로 업데이트
-        send_progress_to_spring(task_id, 25)
+        send_progress.send(25)
 
         # 3. 워터마크 탐지 (모델 추론)
         with torch.no_grad():
@@ -166,7 +181,7 @@ def watermarkDetection():
         pred_message = msg_predict_inference(bit_preds, mask_preds)
         
         # 진행 상태 50%로 업데이트
-        send_progress_to_spring(task_id, 50)
+        send_progress.send(50)
         
         # 5. 원본 메시지 텐서 변환
         wm_bits = ''.join(f"{ord(c):08b}" for c in message.ljust(4, '\x00'))[:32]
@@ -177,7 +192,7 @@ def watermarkDetection():
         bit_acc_pct = round(bit_acc * 100, 1)
         
         # 진행 상태 75%로 업데이트
-        send_progress_to_spring(task_id, 75)
+        send_progress.send(75)
 
         # 10. 응답
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -186,7 +201,7 @@ def watermarkDetection():
         base_name = f"{original_name}{ext}"
 
         # 이미지 전송 완료
-        send_progress_to_spring(task_id, 100)
+        send_progress.send(100)
 
         # 기본 결과값 (정확도 90이상 시)
         result = {
