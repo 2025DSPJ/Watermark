@@ -34,7 +34,8 @@ def pil_to_base64(pil_img, fmt="PNG") -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 # 이미지 전송 진행률 함수
-SPRING_SERVER_URL = 'http://localhost:8080/progress' 
+spring_ip = os.getenv('SPRING_SERVER_IP')
+SPRING_SERVER_URL = f'http://{spring_ip}:8080/progress' 
 
 def send_progress_to_spring(task_id, percent, login_id):
     try:
