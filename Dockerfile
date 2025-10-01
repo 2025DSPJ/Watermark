@@ -36,8 +36,8 @@ WORKDIR /app
 
 # requirements.txt 파일을 복사하고 패키지 설치
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN /opt/conda/bin/pip install --no-cache-dir --upgrade pip && \
+    /opt/conda/bin/pip install --no-cache-dir -r requirements.txt
 
 # 모든 소스 코드 복사
 COPY . .
