@@ -10,25 +10,6 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libgl1-mesa-glx \
     libglib2.0-0 \
-    # OpenCV 의존성
-    libgl1 \
-    libglib2.0-dev \
-    libgtk2.0-dev \
-    libjpeg-dev \
-    libtiff-dev \
-    libpng-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libv4l-dev \
-    libxvidcore-dev \
-    libx264-dev \
-    libfontconfig1 \
-    libharfbuzz-dev \
-    libfreetype6-dev \
-    liblcms2-dev \
-    libwebp-dev \
-    libsdl2-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 컨테이너 내 작업 디렉토리 설정
@@ -36,8 +17,8 @@ WORKDIR /app
 
 # requirements.txt 파일을 복사하고 패키지 설치
 COPY requirements.txt ./
-RUN /opt/conda/bin/pip install --no-cache-dir --upgrade pip && \
-    /opt/conda/bin/pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # 모든 소스 코드 복사
 COPY . .
