@@ -15,6 +15,13 @@ from notebooks.inference_utils import (
     create_random_mask,
     unnormalize_img,
 )
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+os.environ.setdefault("MKL_NUM_THREADS", "4")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "4")
+os.environ.setdefault("TORCH_NUM_THREADS", "4")
+
+torch.set_num_threads(int(os.getenv("TORCH_NUM_THREADS", "4")))
+torch.set_num_interop_threads(1)  # 연산 간 스케줄 오버헤드/비결정성 최소화
 
 # 정규화 파라미터 (ImageNet 기준)
 image_mean = torch.tensor([0.485, 0.456, 0.406])
@@ -78,6 +85,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 ckpt_path = "checkpoints/wam_mit.pth"
 json_path = "checkpoints/params.json"
 wam = load_model_from_checkpoint(json_path, ckpt_path).to(device).eval()
+
+num_threads = torch.get_num_threads()
+print(f"현재 PyTorch 기본 스레드 수: {num_threads}")
+
+cpu_count = os.cpu_count()
+print(f"CPU 코어 수: {cpu_count}")
 
 @app.route('/', methods=['GET'])
 def home():

@@ -23,6 +23,13 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 모든 소스 코드 복사
 COPY . .
 
+# CPU 개수 고정
+ENV OMP_NUM_THREADS=4
+ENV MKL_NUM_THREADS=4
+ENV OPENBLAS_NUM_THREADS=4
+ENV NUMEXPR_NUM_THREADS=4
+ENV TORCH_NUM_THREADS=4
+
 # 컨테이너 내부에서 Flask 앱이 사용할 포트 명시
 EXPOSE 5000
 
