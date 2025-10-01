@@ -15,13 +15,6 @@ from notebooks.inference_utils import (
     create_random_mask,
     unnormalize_img,
 )
-os.environ.setdefault("OMP_NUM_THREADS", "4")
-os.environ.setdefault("MKL_NUM_THREADS", "4")
-os.environ.setdefault("NUMEXPR_NUM_THREADS", "4")
-os.environ.setdefault("TORCH_NUM_THREADS", "4")
-
-torch.set_num_threads(int(os.getenv("TORCH_NUM_THREADS", "4")))
-torch.set_num_interop_threads(1)  # 연산 간 스케줄 오버헤드/비결정성 최소화
 
 # 정규화 파라미터 (ImageNet 기준)
 image_mean = torch.tensor([0.485, 0.456, 0.406])
