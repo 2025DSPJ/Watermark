@@ -9,6 +9,7 @@ from torchvision import transforms
 from datetime import datetime
 import base64
 import requests
+import numpy as np, random
 
 from notebooks.inference_utils import (
     load_model_from_checkpoint,
@@ -25,6 +26,15 @@ default_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=image_mean, std=image_std),
 ])
+
+# SEED 고정
+SEED = 42
+
+torch.manual_seed(SEED)
+torch.use_deterministic_algorithms(True)
+np.random.seed(SEED)
+random.seed(SEED)
+os.environ['PYTHONHASHSEED'] = str(SEED)
 
 # base64 변환 함수
 def pil_to_base64(pil_img, fmt="PNG") -> str:
