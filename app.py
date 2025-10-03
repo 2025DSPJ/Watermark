@@ -196,6 +196,7 @@ def watermarkDetection():
 
         # 4. 예측된 비트로부터 메시지 추출
         pred_message = msg_predict_inference(bit_preds, mask_preds)
+        pred_message_float = pred_message.float()  # float32로 변환
 
         # 📌 [ACCURACY DEBUG] 예측 메시지 로그
         print(f"[ACCURACY DEBUG] 4. 예측 메시지 (pred_message) shape: {pred_message.shape}, device: {pred_message.device}")
@@ -213,14 +214,16 @@ def watermarkDetection():
         print(f"[ACCURACY DEBUG] 원본 비트(wm_tensor) shape: {wm_tensor.shape}, device: {wm_tensor.device}")
         print(f"[ACCURACY DEBUG] 원본 비트(첫 8개): {wm_tensor[:8].tolist()}", flush=True)
 
-        comparison_tensor = (pred_message == wm_tensor.unsqueeze(0)).float()
+        # comparison_tensor = (pred_message == wm_tensor.unsqueeze(0)).float()
+        comparison_tensor = (pred_message_float == wm_tensor.unsqueeze(0)).float()
 
         # 📌 [ACCURACY DEBUG] 비교 로그
         num_correct_bits = comparison_tensor.sum().item()
         print(f"[ACCURACY DEBUG] 일치하는 비트 수: {num_correct_bits} / 32", flush=True)
 
         # 6. 비트 정확도 계산
-        bit_acc = (pred_message == wm_tensor.unsqueeze(0)).float().mean().item()
+        # bit_acc = (pred_message == wm_tensor.unsqueeze(0)).float().mean().item()
+        bit_acc = (pred_message_float == wm_tensor.unsqueeze(0)).float().mean().item()
         bit_acc_pct = round(bit_acc * 100, 1)
 
         # 📌 [ACCURACY DEBUG] 최종 정확도 로그
