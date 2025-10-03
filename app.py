@@ -18,7 +18,7 @@ from notebooks.inference_utils import (
 )
 
 # PyTorch 스레드 수를 4로 강제 설정
-torch.get_num_threads(4)
+torch.set_num_threads(4)
 
 num_threads = torch.get_num_threads()
 print(f"현재 PyTorch 기본 스레드 수: {num_threads}")
