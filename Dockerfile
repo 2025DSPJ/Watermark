@@ -20,6 +20,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# 로컬의 checkpoints/wam_mit.pth 파일을 컨테이너의 /app/checkpoints/로 복사
+COPY checkpoints/wam_mit.pth /app/checkpoints/
+
 # 모든 소스 코드 복사
 COPY . .
 
