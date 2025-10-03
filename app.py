@@ -52,7 +52,7 @@ def send_progress_to_spring(task_id, percent, login_id):
         payload = {
             'taskId': task_id,
             'progress': percent,
-            'login_id': login_id
+            'loginId': login_id
         }
         headers = {
             'Content-Type': 'application/json'
