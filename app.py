@@ -89,6 +89,23 @@ ckpt_path = "checkpoints/wam_mit.pth"
 json_path = "checkpoints/params.json"
 wam = load_model_from_checkpoint(json_path, ckpt_path).to(device).eval()
 
+# =========================================================
+# 💡 디버그 코드 추가 지점: 가중치 로드 성공 여부 확인
+# =========================================================
+try:
+    # 모델의 첫 번째 컨볼루션 레이어의 가중치 값을 출력합니다. 
+    # 모델 구조에 맞게 'encoder.conv1.weight'를 수정해야 할 수 있습니다.
+    first_layer_weights = wam.state_dict()['encoder.conv1.weight']
+    
+    print(f"[MODEL DEBUG] WAM Layer Shape: {first_layer_weights.shape}")
+    print(f"[MODEL DEBUG] WAM First 5 Weights: {first_layer_weights.flatten()[:5].tolist()}", flush=True)
+    
+except KeyError:
+    print("[MODEL DEBUG] WARNING: Cannot find 'encoder.conv1.weight'. Check layer name.", flush=True)
+except Exception as e:
+    # 이 로그가 찍힌다면, 가중치 로드 자체가 실패했을 가능성이 매우 높습니다.
+    print(f"[MODEL DEBUG] CRITICAL ERROR: Failed to read WAM state_dict: {e}", flush=True)
+
 num_threads = torch.get_num_threads()
 print(f"현재 PyTorch 기본 스레드 수: {num_threads}")
 
