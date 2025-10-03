@@ -17,6 +17,15 @@ from notebooks.inference_utils import (
     unnormalize_img,
 )
 
+# PyTorch 스레드 수를 4로 강제 설정
+torch.get_num_threads(4)
+
+num_threads = torch.get_num_threads()
+print(f"현재 PyTorch 기본 스레드 수: {num_threads}")
+
+cpu_count = os.cpu_count()
+print(f"CPU 코어 수: {cpu_count}")
+
 # 정규화 파라미터 (ImageNet 기준)
 image_mean = torch.tensor([0.485, 0.456, 0.406])
 image_std = torch.tensor([0.229, 0.224, 0.225])
@@ -105,12 +114,6 @@ except KeyError:
 except Exception as e:
     # 이 로그가 찍힌다면, 가중치 로드 자체가 실패했을 가능성이 매우 높습니다.
     print(f"[MODEL DEBUG] CRITICAL ERROR: Failed to read WAM state_dict: {e}", flush=True)
-
-num_threads = torch.get_num_threads()
-print(f"현재 PyTorch 기본 스레드 수: {num_threads}")
-
-cpu_count = os.cpu_count()
-print(f"CPU 코어 수: {cpu_count}")
 
 @app.route('/', methods=['GET'])
 def home():
