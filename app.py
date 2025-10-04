@@ -89,6 +89,33 @@ def safe_filename(filename: str) -> str:
     name = name.replace(" ", "_")
     return name + ext
 
+# 비트를 문자열로 반환
+def bits_to_message(bit_tensor, num_chars=4):
+    """
+    32개의 예측 비트 텐서를 4글자 문자열로 변환합니다.
+    """
+    # 텐서를 CPU로 이동하고 리스트로 변환 (0 또는 1)
+    bits = bit_tensor[0].cpu().tolist()[:32]
+    
+    # 8비트씩 묶어 문자로 변환
+    message_chars = []
+    for i in range(0, len(bits), 8):
+        byte_bits = bits[i:i+8]
+        # 이진수 문자열로 변환
+        bit_string = "".join(map(str, [int(round(b)) for b in byte_bits])) 
+        
+        try:
+            # 이진수 문자열을 정수로, 다시 문자로 변환
+            char_code = int(bit_string, 2)
+            char = chr(char_code)
+            message_chars.append(char)
+        except ValueError:
+            # 변환 오류 시 안전을 위해 처리 (ex: 유효하지 않은 ASCII 코드)
+            message_chars.append('?') 
+            
+    # \x00 (null) 문자는 제거하여 원래 메시지만 반환
+    return "".join(message_chars).replace('\x00', '')
+
 app = Flask(__name__)
 CORS(app, origins="*")
 
@@ -216,11 +243,16 @@ def watermarkDetection():
 
         # 4. 예측된 비트로부터 메시지 추출
         pred_message = msg_predict_inference(bit_preds, mask_preds)
-        pred_message_float = pred_message.float()  # float32로 변환
+        pred_message_float = pred_message.float()  # float32로 
+        
+        # 📌 예측된 메시지를 문자열로 변환
+        predicted_message_str = bits_to_message(pred_message)
 
         # 📌 [ACCURACY DEBUG] 예측 메시지 로그
         print(f"[ACCURACY DEBUG] 4. 예측 메시지 (pred_message) shape: {pred_message.shape}, device: {pred_message.device}")
         print(f"[ACCURACY DEBUG] 예측 비트(첫 8개): {pred_message[0, :8].tolist()}")
+        print(f"[PREDICTION RESULT] 원본 메시지: {message}")
+        print(f"[PREDICTION RESULT] 예측된 메시지: '{predicted_message_str}'", flush=True) # 로그 추가
         
         # 진행 상태 50%로 업데이트
         send_progress.send(50)
